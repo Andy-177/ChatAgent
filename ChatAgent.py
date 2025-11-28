@@ -1,7 +1,7 @@
 import json
 import os
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, StringVar
+from tkinter import ttk, scrolledtext, messagebox, StringVar, BooleanVar
 from pydantic import BaseModel
 import requests
 import threading
@@ -17,6 +17,8 @@ class Config(BaseModel):
     user_name: str = "用户"
     ai_name: str = "AI"
     prompt_file: str = "无"  # 默认值为“无”
+    log_commands: bool = False  # 日志选项，默认不记录
+    send_history: bool = False  # 发送历史记录选项，默认不发送
 
     def save_to_file(self, file_path="config.json"):
         with open(file_path, "w", encoding="utf-8") as f:
@@ -42,6 +44,9 @@ class AIChatTool:
         self.prompt_files = self.get_prompt_files()
         self.selected_prompt = StringVar()
         self.selected_prompt.set(self.config.prompt_file)  # 从配置中加载提示词文件名称
+        self.log_commands_var = BooleanVar(value=self.config.log_commands)  # 日志选项变量
+        self.send_history_var = BooleanVar(value=self.config.send_history)  # 发送历史记录选项变量
+        self.chat_history = []  # 用于存储聊天记录
         self.create_widgets()
 
     def get_prompt_files(self):
@@ -94,8 +99,11 @@ class AIChatTool:
         self.prompt_menu.grid(row=5, column=1, padx=5, pady=2, sticky="w")
         self.selected_prompt.set(self.config.prompt_file)  # 设置为配置中的提示词文件
 
+        ttk.Checkbutton(config_frame, text="记录命令日志", variable=self.log_commands_var).grid(row=6, column=1, sticky="w")
+        ttk.Checkbutton(config_frame, text="发送历史记录", variable=self.send_history_var).grid(row=7, column=1, sticky="w")
+
         save_config_button = ttk.Button(config_frame, text="保存配置", command=self.save_config)
-        save_config_button.grid(row=6, column=1, pady=5, sticky="e")
+        save_config_button.grid(row=8, column=1, pady=5, sticky="e")
 
         # 聊天框
         chat_frame = ttk.LabelFrame(self.root, text="聊天", padding=5)
@@ -121,6 +129,8 @@ class AIChatTool:
         self.config.user_name = self.user_name_entry.get()
         self.config.ai_name = self.ai_name_entry.get()
         self.config.prompt_file = self.selected_prompt.get()  # 保存提示词文件名称
+        self.config.log_commands = self.log_commands_var.get()  # 保存日志选项
+        self.config.send_history = self.send_history_var.get()  # 保存发送历史记录选项
         self.config.save_to_file()
         messagebox.showinfo("提示", "配置已保存！")
 
@@ -162,12 +172,19 @@ class AIChatTool:
                 {
                     "role": "system",
                     "content": system_content
-                },
-                {
-                    "role": "user",
-                    "content": user_message
                 }
             ]
+
+            # 如果发送历史记录选项被勾选，则将历史记录添加到消息列表中
+            if self.config.send_history:
+                for entry in self.chat_history:
+                    messages.append({"role": entry["role"], "content": entry["content"]})
+
+            # 添加当前用户消息
+            messages.append({
+                "role": "user",
+                "content": user_message
+            })
 
             response = requests.post(
                 self.config.api_url,
@@ -192,9 +209,15 @@ class AIChatTool:
             for match in matches:
                 command_type = match[0]
                 command = match[1].strip()
+                if self.config.log_commands:  # 如果日志选项被勾选
+                    self.chat_display.insert(tk.END, f"[日志] 执行命令: {command}\n")
                 threading.Thread(target=self.run_command, args=(command_type, command), daemon=True).start()
         else:
             self.chat_display.insert(tk.END, f"{self.config.ai_name}: {ai_response}\n")
+
+        # 将用户消息和 AI 回复添加到聊天历史中
+        self.chat_history.append({"role": "user", "content": self.user_input.get()})
+        self.chat_history.append({"role": "assistant", "content": ai_response})
 
     def run_command(self, command_type, command):
         try:
@@ -210,6 +233,11 @@ class AIChatTool:
 
             output = result.stdout.strip()
             error = result.stderr.strip()
+
+            if self.config.log_commands:  # 如果日志选项被勾选
+                self.chat_display.insert(tk.END, f"[日志] 命令输出: {output}\n")
+                if error:
+                    self.chat_display.insert(tk.END, f"[日志] 命令错误: {error}\n")
 
             if not output and not error:
                 # 如果没有返回内容，发送“没有返回内容”给 AI
