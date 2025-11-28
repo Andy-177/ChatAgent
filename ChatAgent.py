@@ -19,6 +19,8 @@ class Config(BaseModel):
     prompt_file: str = "无"  # 默认值为“无”
     log_commands: bool = False  # 日志选项，默认不记录
     send_history: bool = False  # 发送历史记录选项，默认不发送
+    save_history: bool = False  # 保存历史记录选项，默认不保存
+    send_saved_history: bool = False  # 发送已保存的历史记录选项，默认不发送
 
     def save_to_file(self, file_path="config.json"):
         with open(file_path, "w", encoding="utf-8") as f:
@@ -46,8 +48,13 @@ class AIChatTool:
         self.selected_prompt.set(self.config.prompt_file)  # 从配置中加载提示词文件名称
         self.log_commands_var = BooleanVar(value=self.config.log_commands)  # 日志选项变量
         self.send_history_var = BooleanVar(value=self.config.send_history)  # 发送历史记录选项变量
+        self.save_history_var = BooleanVar(value=self.config.save_history)  # 保存历史记录选项变量
+        self.send_saved_history_var = BooleanVar(value=self.config.send_saved_history)  # 发送已保存的历史记录选项变量
         self.chat_history = []  # 用于存储聊天记录
         self.create_widgets()
+
+        # 加载已保存的历史记录
+        self.saved_history = self.load_saved_history()
 
     def get_prompt_files(self):
         """获取根目录下的所有 .txt 文件"""
@@ -101,9 +108,11 @@ class AIChatTool:
 
         ttk.Checkbutton(config_frame, text="记录命令日志", variable=self.log_commands_var).grid(row=6, column=1, sticky="w")
         ttk.Checkbutton(config_frame, text="发送历史记录", variable=self.send_history_var).grid(row=7, column=1, sticky="w")
+        ttk.Checkbutton(config_frame, text="保存历史记录", variable=self.save_history_var).grid(row=8, column=1, sticky="w")
+        ttk.Checkbutton(config_frame, text="发送已保存的历史记录", variable=self.send_saved_history_var).grid(row=9, column=1, sticky="w")
 
         save_config_button = ttk.Button(config_frame, text="保存配置", command=self.save_config)
-        save_config_button.grid(row=8, column=1, pady=5, sticky="e")
+        save_config_button.grid(row=10, column=1, pady=5, sticky="e")
 
         # 聊天框
         chat_frame = ttk.LabelFrame(self.root, text="聊天", padding=5)
@@ -131,6 +140,8 @@ class AIChatTool:
         self.config.prompt_file = self.selected_prompt.get()  # 保存提示词文件名称
         self.config.log_commands = self.log_commands_var.get()  # 保存日志选项
         self.config.send_history = self.send_history_var.get()  # 保存发送历史记录选项
+        self.config.save_history = self.save_history_var.get()  # 保存保存历史记录选项
+        self.config.send_saved_history = self.send_saved_history_var.get()  # 保存发送已保存的历史记录选项
         self.config.save_to_file()
         messagebox.showinfo("提示", "配置已保存！")
 
@@ -167,6 +178,11 @@ class AIChatTool:
                     prompt_content = f.read()
                 system_content += f"\n{prompt_content}"
 
+            # 如果发送已保存的历史记录选项被勾选，则读取并添加已保存的历史记录
+            if self.config.send_saved_history:
+                for entry in self.saved_history:
+                    system_content += f"\n{entry['role']}: {entry['content']}"
+
             # 构建消息列表
             messages = [
                 {
@@ -175,7 +191,7 @@ class AIChatTool:
                 }
             ]
 
-            # 如果发送历史记录选项被勾选，则将历史记录添加到消息列表中
+            # 如果发送历史记录选项被勾选，则将聊天历史添加到消息列表中
             if self.config.send_history:
                 for entry in self.chat_history:
                     messages.append({"role": entry["role"], "content": entry["content"]})
@@ -219,6 +235,10 @@ class AIChatTool:
         self.chat_history.append({"role": "user", "content": self.user_input.get()})
         self.chat_history.append({"role": "assistant", "content": ai_response})
 
+        # 如果保存历史记录选项被勾选，则将聊天记录保存到文件
+        if self.config.save_history:
+            self.save_chat_history(ai_response)
+
     def run_command(self, command_type, command):
         try:
             if command_type == "cmd":
@@ -248,6 +268,27 @@ class AIChatTool:
                 self.call_api(response_content)
         except Exception as e:
             self.chat_display.insert(tk.END, f"命令执行失败: {str(e)}\n")
+
+    def save_chat_history(self, ai_response):
+        """将聊天记录保存到文件"""
+        history_file = "history.hty"
+        with open(history_file, "a", encoding="utf-8") as f:
+            f.write(f"{self.config.user_name}: {self.user_input.get()}\n")
+            f.write(f"{self.config.ai_name}: {ai_response}\n")
+
+    def load_saved_history(self):
+        """加载已保存的历史记录"""
+        history_file = "history.hty"
+        saved_history = []
+        if os.path.exists(history_file):
+            with open(history_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for i in range(0, len(lines), 2):
+                    user_message = lines[i].strip()
+                    ai_response = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                    saved_history.append({"role": "user", "content": user_message})
+                    saved_history.append({"role": "assistant", "content": ai_response})
+        return saved_history
 
 # 运行程序
 if __name__ == "__main__":
